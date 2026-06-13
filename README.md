@@ -50,6 +50,7 @@ Open PowerShell and run:
 
 ```powershell
 python --version
+winget install Git.Git
 git clone https://github.com/Ren42377/streakium-windows.git
 cd streakium-windows
 .\install.cmd
