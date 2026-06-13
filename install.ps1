@@ -1,3 +1,7 @@
+param(
+    [switch]$LoadOnly
+)
+
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
@@ -22,25 +26,102 @@ function Write-Step {
     Write-Host "==> $Message"
 }
 
-function Get-Python311 {
-    if (Get-Command py.exe -ErrorAction SilentlyContinue) {
-        $path = & py.exe -3.11 -c "import sys; print(sys.executable)" 2>$null
-        if ($LASTEXITCODE -eq 0 -and $path) {
-            return $path.Trim()
-        }
-    }
-    if (Get-Command python.exe -ErrorAction SilentlyContinue) {
-        $result = & python.exe -c "import sys; print(sys.executable if sys.version_info[:2] == (3, 11) else '')"
-        if ($LASTEXITCODE -eq 0 -and $result) {
-            return $result.Trim()
-        }
-    }
-    $candidates = @(
-        "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
-        "$env:PROGRAMFILES\Python311\python.exe",
-        "${env:PROGRAMFILES(X86)}\Python311\python.exe"
+function Invoke-NativeProbe {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments
     )
-    foreach ($candidate in $candidates) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreferenceExists = Test-Path variable:PSNativeCommandUseErrorActionPreference
+    if ($nativePreferenceExists) {
+        $previousNativePreference = $PSNativeCommandUseErrorActionPreference
+    }
+    try {
+        $ErrorActionPreference = "Continue"
+        if ($nativePreferenceExists) {
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+        $output = & $FilePath @Arguments 2>$null
+        $exitCode = $LASTEXITCODE
+    } catch {
+        return $null
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        if ($nativePreferenceExists) {
+            $PSNativeCommandUseErrorActionPreference = $previousNativePreference
+        }
+    }
+    if ($exitCode -ne 0 -or -not $output) {
+        return $null
+    }
+    return ([string]($output | Select-Object -First 1)).Trim()
+}
+
+function Invoke-CheckedNativeCommand {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [string]$FailureMessage
+    )
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreferenceExists = Test-Path variable:PSNativeCommandUseErrorActionPreference
+    if ($nativePreferenceExists) {
+        $previousNativePreference = $PSNativeCommandUseErrorActionPreference
+    }
+    try {
+        $ErrorActionPreference = "Continue"
+        if ($nativePreferenceExists) {
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+        & $FilePath @Arguments
+        $exitCode = $LASTEXITCODE
+    } catch {
+        throw "$FailureMessage $($_.Exception.Message)"
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        if ($nativePreferenceExists) {
+            $PSNativeCommandUseErrorActionPreference = $previousNativePreference
+        }
+    }
+    if ($exitCode -ne 0) {
+        throw "$FailureMessage Exit code: $exitCode."
+    }
+}
+
+function Get-Python311 {
+    param(
+        [string]$LauncherCommand = "py.exe",
+        [string]$PythonCommand = "python.exe",
+        [AllowEmptyCollection()]
+        [string[]]$CandidatePaths
+    )
+    if (Get-Command $LauncherCommand -ErrorAction SilentlyContinue) {
+        $path = Invoke-NativeProbe -FilePath $LauncherCommand -Arguments @(
+            "-3.11",
+            "-c",
+            "import sys; print(sys.executable)"
+        )
+        if ($path) {
+            return $path
+        }
+    }
+    if (Get-Command $PythonCommand -ErrorAction SilentlyContinue) {
+        $result = Invoke-NativeProbe -FilePath $PythonCommand -Arguments @(
+            "-c",
+            "import sys; print(sys.executable if sys.version_info[:2] == (3, 11) else '')"
+        )
+        if ($result) {
+            return $result
+        }
+    }
+    if ($null -eq $CandidatePaths) {
+        $CandidatePaths = @(
+            "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+            "$env:PROGRAMFILES\Python311\python.exe",
+            "${env:PROGRAMFILES(X86)}\Python311\python.exe"
+        )
+    }
+    foreach ($candidate in $CandidatePaths) {
         if ($candidate -and (Test-Path $candidate)) {
             return (Resolve-Path $candidate).Path
         }
@@ -190,6 +271,10 @@ function Register-StreakiumTask {
         -Force | Out-Null
 }
 
+if ($LoadOnly) {
+    return
+}
+
 Set-Location $ProjectDir
 New-Item -ItemType Directory -Force -Path $RuntimeDir, $ToolsDir, $DownloadDir | Out-Null
 
@@ -197,10 +282,19 @@ $python = Get-Python311
 if (-not $python) {
     Write-Step "Installing Python 3.11"
     Ensure-Winget
-    winget install --id Python.Python.3.11 --exact --source winget --accept-package-agreements --accept-source-agreements
-    if ($LASTEXITCODE -ne 0) {
-        throw "Python 3.11 installation failed."
-    }
+    Invoke-CheckedNativeCommand `
+        -FilePath "winget.exe" `
+        -Arguments @(
+            "install",
+            "--id",
+            "Python.Python.3.11",
+            "--exact",
+            "--source",
+            "winget",
+            "--accept-package-agreements",
+            "--accept-source-agreements"
+        ) `
+        -FailureMessage "Python 3.11 installation failed."
     $python = Get-Python311
     if (-not $python) {
         throw "Python 3.11 was installed but could not be found. Restart Windows and run install.cmd again."
@@ -211,10 +305,19 @@ $chrome = Get-ChromePath
 if (-not $chrome) {
     Write-Step "Installing Google Chrome"
     Ensure-Winget
-    winget install --id Google.Chrome --exact --source winget --accept-package-agreements --accept-source-agreements
-    if ($LASTEXITCODE -ne 0) {
-        throw "Google Chrome installation failed."
-    }
+    Invoke-CheckedNativeCommand `
+        -FilePath "winget.exe" `
+        -Arguments @(
+            "install",
+            "--id",
+            "Google.Chrome",
+            "--exact",
+            "--source",
+            "winget",
+            "--accept-package-agreements",
+            "--accept-source-agreements"
+        ) `
+        -FailureMessage "Google Chrome installation failed."
     $chrome = Get-ChromePath
     if (-not $chrome) {
         throw "Google Chrome was installed but could not be found."
@@ -223,19 +326,34 @@ if (-not $chrome) {
 
 Write-Step "Creating local Python environment"
 if (-not (Test-Path (Join-Path $VenvDir "Scripts\python.exe"))) {
-    & $python -m venv $VenvDir
+    Invoke-CheckedNativeCommand `
+        -FilePath $python `
+        -Arguments @("-m", "venv", $VenvDir) `
+        -FailureMessage "The local Python environment could not be created."
 }
 $venvPython = Join-Path $VenvDir "Scripts\python.exe"
-& $venvPython -m pip install --disable-pip-version-check --upgrade pip setuptools
-& $venvPython -m pip install --disable-pip-version-check -r (Join-Path $ProjectDir "requirements.txt")
+Invoke-CheckedNativeCommand `
+    -FilePath $venvPython `
+    -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "--upgrade", "pip", "setuptools") `
+    -FailureMessage "pip and setuptools could not be upgraded."
+Invoke-CheckedNativeCommand `
+    -FilePath $venvPython `
+    -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "-r", (Join-Path $ProjectDir "requirements.txt")) `
+    -FailureMessage "Python dependencies could not be installed."
 
 Install-Stockfish
 Install-FFmpeg
 Install-ChromeDriver -ChromePath $chrome
 
 Write-Step "Validating installation"
-& $venvPython -c "from ai_edge_litert.interpreter import Interpreter; import numpy; import selenium; import undetected_chromedriver"
-& $venvPython -c "from streakium.browser import find_chrome_binary; from streakium.runtime_paths import get_chromedriver_binary, get_ffmpeg_binary, get_stockfish_binary; assert find_chrome_binary(); assert get_chromedriver_binary(); assert get_ffmpeg_binary(); assert get_stockfish_binary()"
+Invoke-CheckedNativeCommand `
+    -FilePath $venvPython `
+    -Arguments @("-c", "from ai_edge_litert.interpreter import Interpreter; import numpy; import selenium; import undetected_chromedriver") `
+    -FailureMessage "Python dependency validation failed."
+Invoke-CheckedNativeCommand `
+    -FilePath $venvPython `
+    -Arguments @("-c", "from streakium.browser import find_chrome_binary; from streakium.runtime_paths import get_chromedriver_binary, get_ffmpeg_binary, get_stockfish_binary; assert find_chrome_binary(); assert get_chromedriver_binary(); assert get_ffmpeg_binary(); assert get_stockfish_binary()") `
+    -FailureMessage "Streakium tool validation failed."
 
 Write-Step "Registering Windows Task Scheduler"
 Register-StreakiumTask

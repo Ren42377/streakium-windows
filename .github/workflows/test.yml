@@ -13,4 +13,6 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - shell: powershell
+        run: .\tests\install.tests.ps1
       - run: python -m pytest
