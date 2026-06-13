@@ -21,18 +21,18 @@ try {
         "exit /b 0"
     )
 
-    $missingRuntime = Get-Python311 `
+    $missingRuntime = Get-GlobalPython `
         -LauncherCommand $failingLauncher `
         -PythonCommand $missingPython `
         -CandidatePaths @()
     if ($null -ne $missingRuntime) {
-        throw "A missing Python 3.11 runtime must return null."
+        throw "A missing supported global Python runtime must return null."
     }
     if ($ErrorActionPreference -ne $originalPreference) {
         throw "The Python probe did not restore ErrorActionPreference."
     }
 
-    $runtime = Get-Python311 `
+    $runtime = Get-GlobalPython `
         -LauncherCommand $successfulLauncher `
         -PythonCommand $missingPython `
         -CandidatePaths @()

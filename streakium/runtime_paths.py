@@ -19,10 +19,6 @@ def get_auth_profile_dir() -> Path:
     return get_streakium_home() / "auth" / "selenium-profile"
 
 
-def get_virtualenv_dir() -> Path:
-    return get_streakium_home() / "venv"
-
-
 def get_tools_dir() -> Path:
     return get_streakium_home() / "tools"
 

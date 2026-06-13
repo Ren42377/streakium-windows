@@ -4,7 +4,7 @@ from pathlib import Path
 def test_installer_keeps_runtime_local_and_registers_recurring_task():
     script = Path("install.ps1").read_text(encoding="utf-8")
     assert 'Join-Path $ProjectDir ".streakium"' in script
-    assert 'Join-Path $RuntimeDir "venv"' in script
+    assert 'Join-Path $RuntimeDir "venv"' not in script
     assert 'Join-Path $RuntimeDir "tools"' in script
     assert "Get-VerifiedDownload" in script
     assert "New-ScheduledTaskTrigger" in script
@@ -15,3 +15,5 @@ def test_installer_keeps_runtime_local_and_registers_recurring_task():
     assert "[switch]$LoadOnly" in script
     assert "Invoke-NativeProbe" in script
     assert "Invoke-CheckedNativeCommand" in script
+    assert "--user" in script
+    assert "Python.Python" not in script
