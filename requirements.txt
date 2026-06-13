@@ -1,0 +1,6 @@
+selenium
+setuptools
+undetected-chromedriver
+chess
+numpy
+ai-edge-litert==2.1.5
