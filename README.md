@@ -20,6 +20,20 @@ Automation can violate platform rules and may put accounts at risk. Use conserva
 
 Python 3.11 and Google Chrome are installed through `winget` when missing. The Python environment, ChromeDriver, Stockfish, FFmpeg, browser profile, logs, and scheduler state remain inside this repository.
 
+## Fast Setup
+
+Open PowerShell and run:
+
+```powershell
+git clone https://github.com/Ren42377/streakium-windows.git
+cd streakium-windows
+.\install.cmd
+notepad .\config.txt
+.\run.cmd
+```
+
+Complete any requested logins in the visible Chrome window. Later runs can use `run.cmd` directly.
+
 ## Installation
 
 1. Double-click `install.cmd`.
