@@ -15,7 +15,6 @@ if ($env:STREAKIUM_HOME) {
 } else {
     $RuntimeDir = Join-Path $ProjectDir ".streakium"
 }
-$VenvDir = Join-Path $RuntimeDir "venv"
 $ToolsDir = Join-Path $RuntimeDir "tools"
 $DownloadDir = Join-Path $RuntimeDir "downloads"
 $TaskName = "Streakium Scheduler"
@@ -88,18 +87,19 @@ function Invoke-CheckedNativeCommand {
     }
 }
 
-function Get-Python311 {
+function Get-GlobalPython {
     param(
         [string]$LauncherCommand = "py.exe",
         [string]$PythonCommand = "python.exe",
         [AllowEmptyCollection()]
         [string[]]$CandidatePaths
     )
+    $versionScript = "import sys; print(sys.executable if (3, 11) <= sys.version_info[:2] <= (3, 14) else '')"
     if (Get-Command $LauncherCommand -ErrorAction SilentlyContinue) {
         $path = Invoke-NativeProbe -FilePath $LauncherCommand -Arguments @(
-            "-3.11",
+            "-3",
             "-c",
-            "import sys; print(sys.executable)"
+            $versionScript
         )
         if ($path) {
             return $path
@@ -108,7 +108,7 @@ function Get-Python311 {
     if (Get-Command $PythonCommand -ErrorAction SilentlyContinue) {
         $result = Invoke-NativeProbe -FilePath $PythonCommand -Arguments @(
             "-c",
-            "import sys; print(sys.executable if sys.version_info[:2] == (3, 11) else '')"
+            $versionScript
         )
         if ($result) {
             return $result
@@ -116,14 +116,18 @@ function Get-Python311 {
     }
     if ($null -eq $CandidatePaths) {
         $CandidatePaths = @(
-            "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
-            "$env:PROGRAMFILES\Python311\python.exe",
-            "${env:PROGRAMFILES(X86)}\Python311\python.exe"
+            "$env:LOCALAPPDATA\Programs\Python\Python314\python.exe",
+            "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
+            "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+            "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe"
         )
     }
     foreach ($candidate in $CandidatePaths) {
         if ($candidate -and (Test-Path $candidate)) {
-            return (Resolve-Path $candidate).Path
+            $result = Invoke-NativeProbe -FilePath $candidate -Arguments @("-c", $versionScript)
+            if ($result) {
+                return $result
+            }
         }
     }
     return $null
@@ -278,27 +282,9 @@ if ($LoadOnly) {
 Set-Location $ProjectDir
 New-Item -ItemType Directory -Force -Path $RuntimeDir, $ToolsDir, $DownloadDir | Out-Null
 
-$python = Get-Python311
+$python = Get-GlobalPython
 if (-not $python) {
-    Write-Step "Installing Python 3.11"
-    Ensure-Winget
-    Invoke-CheckedNativeCommand `
-        -FilePath "winget.exe" `
-        -Arguments @(
-            "install",
-            "--id",
-            "Python.Python.3.11",
-            "--exact",
-            "--source",
-            "winget",
-            "--accept-package-agreements",
-            "--accept-source-agreements"
-        ) `
-        -FailureMessage "Python 3.11 installation failed."
-    $python = Get-Python311
-    if (-not $python) {
-        throw "Python 3.11 was installed but could not be found. Restart Windows and run install.cmd again."
-    }
+    throw "A supported global Python installation was not found. Install the latest 64-bit Python from python.org, enable the Python launcher or PATH option, then run install.cmd again."
 }
 
 $chrome = Get-ChromePath
@@ -324,21 +310,14 @@ if (-not $chrome) {
     }
 }
 
-Write-Step "Creating local Python environment"
-if (-not (Test-Path (Join-Path $VenvDir "Scripts\python.exe"))) {
-    Invoke-CheckedNativeCommand `
-        -FilePath $python `
-        -Arguments @("-m", "venv", $VenvDir) `
-        -FailureMessage "The local Python environment could not be created."
-}
-$venvPython = Join-Path $VenvDir "Scripts\python.exe"
+Write-Step "Installing Python dependencies"
 Invoke-CheckedNativeCommand `
-    -FilePath $venvPython `
-    -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "--upgrade", "pip", "setuptools") `
+    -FilePath $python `
+    -Arguments @("-m", "pip", "install", "--user", "--disable-pip-version-check", "--upgrade", "pip", "setuptools") `
     -FailureMessage "pip and setuptools could not be upgraded."
 Invoke-CheckedNativeCommand `
-    -FilePath $venvPython `
-    -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "-r", (Join-Path $ProjectDir "requirements.txt")) `
+    -FilePath $python `
+    -Arguments @("-m", "pip", "install", "--user", "--disable-pip-version-check", "-r", (Join-Path $ProjectDir "requirements.txt")) `
     -FailureMessage "Python dependencies could not be installed."
 
 Install-Stockfish
@@ -347,11 +326,11 @@ Install-ChromeDriver -ChromePath $chrome
 
 Write-Step "Validating installation"
 Invoke-CheckedNativeCommand `
-    -FilePath $venvPython `
+    -FilePath $python `
     -Arguments @("-c", "from ai_edge_litert.interpreter import Interpreter; import numpy; import selenium; import undetected_chromedriver") `
     -FailureMessage "Python dependency validation failed."
 Invoke-CheckedNativeCommand `
-    -FilePath $venvPython `
+    -FilePath $python `
     -Arguments @("-c", "from streakium.browser import find_chrome_binary; from streakium.runtime_paths import get_chromedriver_binary, get_ffmpeg_binary, get_stockfish_binary; assert find_chrome_binary(); assert get_chromedriver_binary(); assert get_ffmpeg_binary(); assert get_stockfish_binary()") `
     -FailureMessage "Streakium tool validation failed."
 
